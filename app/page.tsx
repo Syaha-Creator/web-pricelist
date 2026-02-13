@@ -1,65 +1,166 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { User, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import InputField from "@/components/InputField";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/proxy-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: username,
+          password,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorMessage =
+          data?.message ?? data?.error ?? (typeof data === "string" ? data : "Login failed");
+        throw new Error(typeof errorMessage === "string" ? errorMessage : "Login failed");
+      }
+
+      // Store access token (or relevant token from response)
+      const accessToken = data?.access_token ?? data?.accessToken ?? data?.token;
+      if (accessToken) {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("access_token", accessToken);
+        }
+      }
+
+      console.log("Login response:", data);
+      router.push("/dashboard");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPassword((prev) => !prev);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8 font-sans">
+      <div className="w-full max-w-md">
+        {/* Login Card */}
+        <div className="rounded-2xl bg-white px-6 py-8 shadow-lg shadow-slate-200/80 sm:px-8 sm:py-10">
+          {/* Header */}
+          <div className="mb-8 text-center">
+            <h1 className="text-2xl font-bold text-slate-800 sm:text-3xl">
+              Alita Pricelist
+            </h1>
+            <p className="mt-2 text-sm text-slate-500">
+              Sign in to your account
+            </p>
+          </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div
+              id="login-error"
+              role="alert"
+              aria-live="polite"
+              className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <InputField
+              id="username"
+              label="Email"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={isLoading}
+              autoComplete="username"
+              aria-label="Email"
+              ariaDescribedBy={error ? "login-error" : undefined}
+              error={!!error}
+              placeholder="Enter your email"
+              prefixIcon={<User className="h-5 w-5" aria-hidden size={20} />}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            <InputField
+              id="password"
+              label="Password"
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              autoComplete="current-password"
+              aria-label="Password"
+              ariaDescribedBy={error ? "login-error" : undefined}
+              error={!!error}
+              placeholder="Enter your password"
+              prefixIcon={<Lock className="h-5 w-5" aria-hidden size={20} />}
+              suffixElement={
+                <button
+                  type="button"
+                  onClick={togglePasswordVisibility}
+                  disabled={isLoading}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="text-slate-400 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" aria-hidden size={20} />
+                  ) : (
+                    <Eye className="h-5 w-5" aria-hidden size={20} />
+                  )}
+                </button>
+              }
+            />
+
+            {/* Login Button */}
+            <button
+              type="submit"
+              disabled={isLoading}
+              aria-busy={isLoading}
+              aria-live="polite"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white shadow-md transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2
+                    className="h-5 w-5 animate-spin"
+                    aria-hidden="true"
+                    size={20}
+                  />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                <span>Login</span>
+              )}
+            </button>
+          </form>
         </div>
-      </main>
+
+        {/* Footer hint */}
+        <p className="mt-6 text-center text-xs text-slate-500">
+          Enter your credentials to sign in
+        </p>
+      </div>
     </div>
   );
 }
