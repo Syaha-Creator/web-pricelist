@@ -439,7 +439,7 @@ function ChatMessage({
           "max-w-[85%] space-y-2 rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
           isBot
             ? "rounded-tl-none bg-white border border-slate-100 shadow-sm text-slate-700"
-            : "rounded-tr-none bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md shadow-blue-500/20"
+            : "rounded-tr-none bg-linear-to-br from-blue-600 to-blue-700 text-white shadow-md shadow-blue-500/20"
         )}
       >
         {message.type === "text" && (
@@ -932,7 +932,7 @@ export default function AlitaChat({
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className={clsx(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md shadow-blue-500/25",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-blue-600 to-blue-700 text-white shadow-md shadow-blue-500/25",
                 "disabled:opacity-50"
               )}
             >
