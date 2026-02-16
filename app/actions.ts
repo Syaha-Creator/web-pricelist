@@ -2,31 +2,32 @@
 
 import { revalidatePath } from "next/cache";
 import { query } from "@/lib/db";
+import type {
+  Product,
+  GetProductsResult,
+  OrderLetter,
+  WorkPlace,
+  User,
+  OrderForCreatorChange,
+} from "@/types";
 
-export interface Product {
-  id: number;
-  brand: string;
-  tipe: string;
-  ukuran: string;
-  pricelist: number;
-  end_user_price: number;
-  program: string | null;
-  kasur: string;
-  divan: string;
-  headboard: string;
-  series?: string | null;
-}
+export type { Product, OrderLetter, WorkPlace, User, OrderForCreatorChange };
 
-interface GetProductsResult {
-  products: Product[];
-  hasMore: boolean;
-}
+const DB_ERROR_MESSAGE =
+  "Database belum dikonfigurasi atau tidak tersedia. Silakan atur DB_HOST, DB_USER, DB_PASSWORD, DB_NAME di file .env (lihat .env.example).";
 
-export async function getBrands(): Promise<string[]> {
-  const { rows } = await query<Record<string, unknown>>(
-    `SELECT DISTINCT brand FROM rawdata_price_lists WHERE brand IS NOT NULL AND brand != '' ORDER BY brand`
-  );
-  return rows.map((r) => String(r.brand ?? ""));
+function isDbError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return (
+      msg.includes("database") ||
+      msg.includes("connect") ||
+      msg.includes("does not exist") ||
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("timeout")
+    );
+  }
+  return false;
 }
 
 const SEARCH_COLUMNS = [
@@ -83,7 +84,14 @@ export async function getProducts(
     LIMIT ${limit} OFFSET $${offsetParam}
   `;
 
-  const { rows } = await query<Record<string, unknown>>(sql, params);
+  let rows: Record<string, unknown>[];
+  try {
+    const result = await query<Record<string, unknown>>(sql, params);
+    rows = result.rows;
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
 
   const products: Product[] = rows.map((row) => ({
     id: Number(row.id ?? 0),
@@ -113,38 +121,83 @@ const ADMIN_USER_ID = "5206";
 const CONTACT_API_ACCESS_TOKEN =
   "N0uaYLgpOYh7QvfXWOC6AZ2TJ4qjpAdal4qDUkY458Y";
 
-export interface OrderLetter {
-  id: number;
-  no_sp: string;
-  customer_name: string;
-  extended_amount: number;
-  status: string;
+async function findOrderBySPFromAPI(
+  spNumber: string,
+  accessToken: string
+): Promise<OrderLetter | null> {
+  try {
+    const url = new URL(`${API_BASE_URL}/order_letters`);
+    url.searchParams.set("no_sp", spNumber);
+    url.searchParams.set("access_token", accessToken);
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("client_secret", CLIENT_SECRET);
+    url.searchParams.set("user_id", ADMIN_USER_ID);
+
+    const response = await fetch(url.toString());
+    const data = (await response.json().catch(() => null)) as unknown;
+
+    if (!response.ok) return null;
+
+    let list: Record<string, unknown>[] = [];
+    if (Array.isArray(data)) list = data;
+    else if (data && typeof data === "object" && "result" in data && Array.isArray((data as { result: unknown }).result))
+      list = (data as { result: Record<string, unknown>[] }).result;
+    else if (data && typeof data === "object" && "order_letters" in data && Array.isArray((data as { order_letters: unknown }).order_letters))
+      list = (data as { order_letters: Record<string, unknown>[] }).order_letters;
+    else if (data && typeof data === "object" && "id" in data)
+      list = [data as Record<string, unknown>];
+
+    const row = list.find(
+      (r) => String(r?.no_sp ?? r?.no_sp_number ?? "").trim() === spNumber
+    ) ?? list[0];
+    if (!row) return null;
+
+    return {
+      id: Number(row.id ?? 0),
+      no_sp: String(row.no_sp ?? row.no_sp_number ?? spNumber),
+      customer_name: String(row.customer_name ?? row.customer ?? ""),
+      extended_amount: Number(row.extended_amount ?? row.amount ?? 0),
+      status: String(row.status ?? ""),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function findOrderBySP(
-  spNumber: string
+  spNumber: string,
+  accessToken?: string | null
 ): Promise<OrderLetter | null> {
   const trimmed = spNumber?.trim();
   if (!trimmed) return null;
 
-  const { rows } = await query<Record<string, unknown>>(
-    `SELECT id, no_sp, customer_name, extended_amount, status
-     FROM order_letters
-     WHERE no_sp = $1
-     LIMIT 1`,
-    [trimmed]
-  );
+  try {
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT id, no_sp, customer_name, extended_amount, status
+       FROM order_letters
+       WHERE no_sp = $1
+       LIMIT 1`,
+      [trimmed]
+    );
 
-  if (rows.length === 0) return null;
+    if (rows.length === 0) return null;
 
-  const row = rows[0];
-  return {
-    id: Number(row.id ?? 0),
-    no_sp: String(row.no_sp ?? ""),
-    customer_name: String(row.customer_name ?? ""),
-    extended_amount: Number(row.extended_amount ?? 0),
-    status: String(row.status ?? ""),
-  };
+    const row = rows[0];
+    return {
+      id: Number(row.id ?? 0),
+      no_sp: String(row.no_sp ?? ""),
+      customer_name: String(row.customer_name ?? ""),
+      extended_amount: Number(row.extended_amount ?? 0),
+      status: String(row.status ?? ""),
+    };
+  } catch (err) {
+    if (isDbError(err) && accessToken?.trim()) {
+      const fromApi = await findOrderBySPFromAPI(trimmed, accessToken);
+      if (fromApi) return fromApi;
+    }
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
 }
 
 export async function voidOrderViaAPI(
@@ -190,12 +243,6 @@ export async function voidOrderViaAPI(
   return { success: true };
 }
 
-export interface WorkPlace {
-  id: number;
-  name: string;
-  category: string;
-}
-
 export async function searchWorkPlaces(
   keyword: string
 ): Promise<WorkPlace[]> {
@@ -220,13 +267,17 @@ export async function searchWorkPlaces(
    WHERE ${whereClause}
    LIMIT 5`;
 
-  const { rows } = await query<Record<string, unknown>>(sql, params);
-
-  return rows.map((row) => ({
-    id: Number(row.id ?? 0),
-    name: String(row.name ?? ""),
-    category: String(row.category ?? ""),
-  }));
+  try {
+    const { rows } = await query<Record<string, unknown>>(sql, params);
+    return rows.map((row) => ({
+      id: Number(row.id ?? 0),
+      name: String(row.name ?? ""),
+      category: String(row.category ?? ""),
+    }));
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
 }
 
 export async function updateOrderWorkPlace(
@@ -238,25 +289,24 @@ export async function updateOrderWorkPlace(
     return { success: false, error: "Nomor SP diperlukan." };
   }
 
-  const { rowCount } = await query<Record<string, unknown>>(
-    `UPDATE order_letters
-     SET work_place_id = $1, updated_at = NOW()
-     WHERE no_sp = $2`,
-    [workPlaceId, trimmedSp]
-  );
+  try {
+    const { rowCount } = await query<Record<string, unknown>>(
+      `UPDATE order_letters
+       SET work_place_id = $1, updated_at = NOW()
+       WHERE no_sp = $2`,
+      [workPlaceId, trimmedSp]
+    );
 
-  if (rowCount === 0) {
-    return { success: false, error: "Nomor SP tidak ditemukan." };
+    if (rowCount === 0) {
+      return { success: false, error: "Nomor SP tidak ditemukan." };
+    }
+  } catch (err) {
+    if (isDbError(err)) return { success: false, error: DB_ERROR_MESSAGE };
+    throw err;
   }
 
   revalidatePath("/dashboard");
   return { success: true };
-}
-
-export interface User {
-  id: number;
-  name: string;
-  email: string;
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
@@ -264,13 +314,20 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   if (!trimmed) return null;
 
   // Step A: Get user from local DB (id, name as fallback, email)
-  const { rows } = await query<Record<string, unknown>>(
-    `SELECT id, name, email
-     FROM users
-     WHERE email = $1
-     LIMIT 1`,
-    [trimmed]
-  );
+  let rows: Record<string, unknown>[];
+  try {
+    const result = await query<Record<string, unknown>>(
+      `SELECT id, name, email
+       FROM users
+       WHERE email = $1
+       LIMIT 1`,
+      [trimmed]
+    );
+    rows = result.rows;
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
 
   if (rows.length === 0) return null;
 
@@ -313,13 +370,6 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   };
 }
 
-export interface OrderForCreatorChange {
-  id: number;
-  no_sp: string;
-  creator: number;
-  creator_name: string;
-}
-
 export async function getOrderForCreatorChange(
   spNumber: string
 ): Promise<OrderForCreatorChange | null> {
@@ -350,6 +400,7 @@ export async function getOrderForCreatorChange(
       creator_name: String(row.creator_name ?? `User #${row.creator}`),
     };
   } catch (error) {
+    if (isDbError(error)) throw new Error(DB_ERROR_MESSAGE);
     console.error("CRITICAL ERROR in getOrderForCreatorChange:", error);
     throw new Error("Database query failed");
   }
@@ -365,30 +416,35 @@ export async function updateOrderCreator(
     return { success: false, error: "Nomor SP diperlukan." };
   }
 
-  const { rows } = await query<Record<string, unknown>>(
-    `SELECT id FROM order_letters WHERE no_sp = $1 LIMIT 1`,
-    [trimmedSp]
-  );
+  try {
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT id FROM order_letters WHERE no_sp = $1 LIMIT 1`,
+      [trimmedSp]
+    );
 
-  if (rows.length === 0) {
-    return { success: false, error: "Nomor SP tidak ditemukan." };
+    if (rows.length === 0) {
+      return { success: false, error: "Nomor SP tidak ditemukan." };
+    }
+
+    const orderId = Number(rows[0].id ?? 0);
+
+    await query<Record<string, unknown>>(
+      `UPDATE order_letters
+       SET creator = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [orderId, newUserId]
+    );
+
+    await query<Record<string, unknown>>(
+      `UPDATE order_letter_discounts
+       SET approver = $2, approver_name = $3, updated_at = NOW()
+       WHERE order_letter_id = $1 AND approver_level_id = 1`,
+      [orderId, newUserId, newUserName]
+    );
+  } catch (err) {
+    if (isDbError(err)) return { success: false, error: DB_ERROR_MESSAGE };
+    throw err;
   }
-
-  const orderId = Number(rows[0].id ?? 0);
-
-  await query<Record<string, unknown>>(
-    `UPDATE order_letters
-     SET creator = $2, updated_at = NOW()
-     WHERE id = $1`,
-    [orderId, newUserId]
-  );
-
-  await query<Record<string, unknown>>(
-    `UPDATE order_letter_discounts
-     SET approver = $2, approver_name = $3, updated_at = NOW()
-     WHERE order_letter_id = $1 AND approver_level_id = 1`,
-    [orderId, newUserId, newUserName]
-  );
 
   revalidatePath("/dashboard");
   return { success: true };

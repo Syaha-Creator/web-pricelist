@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/fix-approver-names",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}
