@@ -117,7 +117,6 @@ const API_BASE_URL =
 const CLIENT_ID = process.env.API_CLIENT_ID ?? "";
 const CLIENT_SECRET = process.env.API_CLIENT_SECRET ?? "";
 const ADMIN_USER_ID = process.env.API_ADMIN_USER_ID ?? "";
-const CONTACT_API_ACCESS_TOKEN = process.env.CONTACT_API_ACCESS_TOKEN ?? "";
 
 async function findOrderBySPFromAPI(
   spNumber: string,
@@ -307,7 +306,10 @@ export async function updateOrderWorkPlace(
   return { success: true };
 }
 
-export async function findUserByEmail(email: string): Promise<User | null> {
+export async function findUserByEmail(
+  email: string,
+  accessToken?: string | null
+): Promise<User | null> {
   const trimmed = email?.trim();
   if (!trimmed) return null;
 
@@ -334,30 +336,33 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   const dbName = String(row.name ?? "");
   const userEmail = String(row.email ?? "");
 
-  // Step B & C: Fetch official name from contact_work_experiences API
+  // Step B & C: Fetch official name from contact_work_experiences API (pakai token dari login)
   let apiName: string | null = null;
-  try {
-    const url = new URL(`${API_BASE_URL}/contact_work_experiences`);
-    url.searchParams.set("access_token", CONTACT_API_ACCESS_TOKEN);
-    url.searchParams.set("client_id", CLIENT_ID);
-    url.searchParams.set("client_secret", CLIENT_SECRET);
-    url.searchParams.set("user_id", String(userId));
+  const token = accessToken?.trim();
+  if (token) {
+    try {
+      const url = new URL(`${API_BASE_URL}/contact_work_experiences`);
+      url.searchParams.set("access_token", token);
+      url.searchParams.set("client_id", CLIENT_ID);
+      url.searchParams.set("client_secret", CLIENT_SECRET);
+      url.searchParams.set("user_id", String(userId));
 
-    const response = await fetch(url.toString());
-    const data = (await response.json().catch(() => null)) as Record<
-      string,
-      unknown
-    > | null;
+      const response = await fetch(url.toString());
+      const data = (await response.json().catch(() => null)) as Record<
+        string,
+        unknown
+      > | null;
 
-    if (data?.result && Array.isArray(data.result) && data.result.length > 0) {
-      const first = data.result[0] as Record<string, unknown> | null;
-      const user = first?.user as Record<string, unknown> | null;
-      if (user?.name != null) {
-        apiName = String(user.name);
+      if (data?.result && Array.isArray(data.result) && data.result.length > 0) {
+        const first = data.result[0] as Record<string, unknown> | null;
+        const user = first?.user as Record<string, unknown> | null;
+        if (user?.name != null) {
+          apiName = String(user.name);
+        }
       }
+    } catch {
+      // Fallback to DB name; no need to log for expected network/API issues
     }
-  } catch {
-    // Fallback to DB name; no need to log for expected network/API issues
   }
 
   // Step D: Return with official name or DB fallback

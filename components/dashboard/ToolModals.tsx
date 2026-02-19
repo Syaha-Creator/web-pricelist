@@ -257,7 +257,7 @@ export default function ToolModals({
     setError("");
     setIsLoading(true);
     try {
-      const user = await findUserByEmail(email);
+      const user = await findUserByEmail(email, accessToken);
       if (!user) {
         setError("Email tidak ditemukan di database user.");
         setNewUser(null);
