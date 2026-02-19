@@ -9,9 +9,9 @@ import type {
   WorkPlace,
   User,
   OrderForCreatorChange,
+  SPFullOverview,
+  OrderLetterDetail,
 } from "@/types";
-
-export type { Product, OrderLetter, WorkPlace, User, OrderForCreatorChange };
 
 const DB_ERROR_MESSAGE =
   "Database belum dikonfigurasi atau tidak tersedia. Silakan atur DB_HOST, DB_USER, DB_PASSWORD, DB_NAME di file .env (lihat .env.example).";
@@ -112,14 +112,12 @@ export async function getProducts(
   return { products, hasMore };
 }
 
-const API_BASE_URL = "https://alitav2.massindo.com/api";
-const CLIENT_ID = "UjQrHkqRaXgxrMnsuMQis-nbYp_jEbArPHSIN3QVQC8";
-const CLIENT_SECRET =
-  "yOEtsL-v5SEg4WMDcCU6Qv7lDBhVpJIfPBpJKU68dVo";
-const ADMIN_USER_ID = "5206";
-/** Token for contact_work_experiences (official name lookup) */
-const CONTACT_API_ACCESS_TOKEN =
-  "N0uaYLgpOYh7QvfXWOC6AZ2TJ4qjpAdal4qDUkY458Y";
+const API_BASE_URL =
+  process.env.API_BASE_URL ?? "https://alitav2.massindo.com/api";
+const CLIENT_ID = process.env.API_CLIENT_ID ?? "";
+const CLIENT_SECRET = process.env.API_CLIENT_SECRET ?? "";
+const ADMIN_USER_ID = process.env.API_ADMIN_USER_ID ?? "";
+const CONTACT_API_ACCESS_TOKEN = process.env.CONTACT_API_ACCESS_TOKEN ?? "";
 
 async function findOrderBySPFromAPI(
   spNumber: string,
@@ -448,4 +446,183 @@ export async function updateOrderCreator(
 
   revalidatePath("/dashboard");
   return { success: true };
+}
+
+// ─── Edit Order (SP Full Overview) ────────────────────────────────────────
+
+export async function getSPFullOverview(
+  spNumber: string
+): Promise<SPFullOverview | null> {
+  const trimmed = spNumber?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const { rows: orderRows } = await query<Record<string, unknown>>(
+      `SELECT id, no_sp, customer_name, extended_amount, status,
+              phone, email, address, address_ship_to,
+              order_date, request_date, sales_code, take_away,
+              COALESCE(note, keterangan) as note
+       FROM order_letters
+       WHERE no_sp = $1
+       LIMIT 1`,
+      [trimmed]
+    );
+
+    if (orderRows.length === 0) return null;
+
+    const ol = orderRows[0];
+    const orderId = Number(ol.id ?? 0);
+
+    const [detailsResult, paymentsResult, discountsResult] =
+      await Promise.all([
+        query<Record<string, unknown>>(
+          `SELECT d.id, d.order_letter_id, d.item_number,
+                  COALESCE(NULLIF(d.item_description, ''), NULLIF(d.desc_1, ''), 'Item Tanpa Nama') as item_name,
+                  d.qty, d.unit_price, d.customer_price, d.net_price,
+                  (d.net_price * d.qty) as total, d.brand
+           FROM order_letter_details d
+           WHERE d.order_letter_id = $1
+           ORDER BY d.id`,
+          [orderId]
+        ),
+        query<Record<string, unknown>>(
+          `SELECT id, order_letter_id, payment_amount, payment_method, created_at
+           FROM order_letter_payments
+           WHERE order_letter_id = $1
+           ORDER BY id`,
+          [orderId]
+        ),
+        query<Record<string, unknown>>(
+          `SELECT id, order_letter_id, approver_name, approver_level_id, discount
+           FROM order_letter_discounts
+           WHERE order_letter_id = $1
+           ORDER BY approver_level_id`,
+          [orderId]
+        ),
+      ]);
+
+
+    const items = detailsResult.rows.map((r) => ({
+      id: Number(r.id ?? 0),
+      order_letter_id: Number(r.order_letter_id ?? 0),
+      item_number: String(r.item_number ?? ""),
+      item_description: String(r.item_name ?? "Item Tanpa Nama"),
+      qty: Number(r.qty ?? 0),
+      unit_price: Number(r.unit_price ?? 0),
+      extended_price: Number(r.total ?? 0),
+      brand: r.brand != null ? String(r.brand) : undefined,
+      net_price: r.net_price != null ? Number(r.net_price) : undefined,
+      customer_price: r.customer_price != null ? Number(r.customer_price) : undefined,
+    }));
+
+    const payments = paymentsResult.rows.map((r) => ({
+      id: Number(r.id ?? 0),
+      order_letter_id: Number(r.order_letter_id ?? 0),
+      payment_amount: Number(r.payment_amount ?? 0),
+      payment_method: String(r.payment_method ?? ""),
+      created_at: r.created_at != null ? String(r.created_at) : undefined,
+    }));
+
+    const approvals = discountsResult.rows.map((r) => ({
+      id: Number(r.id ?? 0),
+      order_letter_id: Number(r.order_letter_id ?? 0),
+      approver_name: String(r.approver_name ?? ""),
+      approver_level_id: Number(r.approver_level_id ?? 0),
+      discount: r.discount != null ? Number(r.discount) : undefined,
+    }));
+
+    return {
+      header: {
+        id: orderId,
+        no_sp: String(ol.no_sp ?? ""),
+        customer_name: String(ol.customer_name ?? ""),
+        extended_amount: Number(ol.extended_amount ?? 0),
+        status: String(ol.status ?? ""),
+        phone: ol.phone != null ? String(ol.phone) : undefined,
+        email: ol.email != null ? String(ol.email) : undefined,
+        address: ol.address != null ? String(ol.address) : undefined,
+        address_ship_to: ol.address_ship_to != null ? String(ol.address_ship_to) : undefined,
+        order_date: ol.order_date != null ? String(ol.order_date) : undefined,
+        request_date: ol.request_date != null ? String(ol.request_date) : undefined,
+        sales_code: ol.sales_code != null ? String(ol.sales_code) : undefined,
+        note: ol.note != null ? String(ol.note) : undefined,
+        take_away: ol.take_away != null ? Boolean(ol.take_away) : undefined,
+      },
+      items,
+      payments,
+      approvals,
+    };
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
+}
+
+export async function swapItemProduct(
+  detailId: number,
+  newProductId: number
+): Promise<{ success: true } | { success: false; error: string }> {
+  if (!detailId || !newProductId) {
+    return { success: false, error: "detailId dan productId diperlukan." };
+  }
+
+  try {
+    const { rows: productRows } = await query<Record<string, unknown>>(
+      `SELECT id, brand, tipe, ukuran, end_user_price
+       FROM rawdata_price_lists
+       WHERE id = $1
+       LIMIT 1`,
+      [newProductId]
+    );
+
+    if (productRows.length === 0) {
+      return { success: false, error: "Produk tidak ditemukan." };
+    }
+
+    const p = productRows[0];
+    const itemDescription = [p.brand, p.tipe, p.ukuran]
+      .filter(Boolean)
+      .join(" ");
+    const unitPrice = Number(p.end_user_price ?? 0);
+
+    const { rows: detailRows } = await query<Record<string, unknown>>(
+      `SELECT qty FROM order_letter_details WHERE id = $1 LIMIT 1`,
+      [detailId]
+    );
+
+    if (detailRows.length === 0) {
+      return { success: false, error: "Detail item tidak ditemukan." };
+    }
+
+    const qty = Number(detailRows[0].qty ?? 0);
+    const extendedPrice = qty * unitPrice;
+
+    await query<Record<string, unknown>>(
+      `UPDATE order_letter_details
+       SET
+         item_description = $2,
+         item_number = $3,
+         brand = $4,
+         unit_price = $5,
+         net_price = $5,
+         customer_price = $5,
+         extended_price = $6,
+         updated_at = NOW()
+       WHERE id = $1`,
+      [
+        detailId,
+        itemDescription || "—",
+        String(p.id ?? ""),
+        String(p.brand ?? ""),
+        unitPrice,
+        extendedPrice,
+      ]
+    );
+
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (err) {
+    if (isDbError(err)) return { success: false, error: DB_ERROR_MESSAGE };
+    throw err;
+  }
 }

@@ -1,6 +1,7 @@
-import { InputHTMLAttributes, ReactNode } from "react";
+import { InputHTMLAttributes, type ReactNode } from "react";
 
-interface InputFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "className"> {
+interface InputFieldProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, "className"> {
   id: string;
   label: string;
   prefixIcon?: ReactNode;

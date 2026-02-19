@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const EXTERNAL_API_URL =
-  "https://alitav2.massindo.com/api/sign_in?client_id=UjQrHkqRaXgxrMnsuMQis-nbYp_jEbArPHSIN3QVQC8&client_secret=yOEtsL-v5SEg4WMDcCU6Qv7lDBhVpJIfPBpJKU68dVo";
+function getSignInUrl(): string {
+  const base = process.env.API_BASE_URL ?? "https://alitav2.massindo.com/api";
+  const clientId = process.env.API_CLIENT_ID ?? "";
+  const clientSecret = process.env.API_CLIENT_SECRET ?? "";
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+  });
+  return `${base}/sign_in?${params.toString()}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = await fetch(EXTERNAL_API_URL, {
+    const response = await fetch(getSignInUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { User, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
-import InputField from "@/components/InputField";
+import InputField from "@/components/ui/InputField";
 
 export default function LoginForm() {
   const router = useRouter();

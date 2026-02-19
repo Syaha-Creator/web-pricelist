@@ -10,6 +10,15 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  FileEdit,
+  RefreshCw,
+  CreditCard,
+  ShieldCheck,
+  Package,
+  MapPin,
+  Calendar,
+  ClipboardList,
+  Phone,
 } from "lucide-react";
 import { useTheme } from "./ThemeContext";
 import {
@@ -20,16 +29,22 @@ import {
   getOrderForCreatorChange,
   findUserByEmail,
   updateOrderCreator,
+  getSPFullOverview,
+  getProducts,
+  swapItemProduct,
 } from "@/app/actions";
 import type {
   OrderLetter,
   WorkPlace,
   OrderForCreatorChange,
   User as UserType,
+  SPFullOverview,
+  OrderLetterDetail,
+  Product,
 } from "@/types";
 import Modal from "@/components/ui/Modal";
 
-export type ToolType = "void" | "mutasi" | "ganti-sales";
+export type ToolType = "void" | "mutasi" | "ganti-sales" | "edit-order";
 
 interface ToolModalsProps {
   isOpen: boolean;
@@ -66,6 +81,12 @@ const toolConfig = {
     gradient: "from-emerald-500 to-teal-600",
     iconBg: "from-emerald-500/20 to-teal-600/20",
   },
+  "edit-order": {
+    title: "Edit Order",
+    icon: FileEdit,
+    gradient: "from-violet-500 to-purple-600",
+    iconBg: "from-violet-500/20 to-purple-600/20",
+  },
 };
 
 export default function ToolModals({
@@ -87,6 +108,17 @@ export default function ToolModals({
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [spOverview, setSpOverview] = useState<SPFullOverview | null>(null);
+  const [editOrderTab, setEditOrderTab] = useState<"items" | "payments" | "approvals">("items");
+  const [replaceItemOverlay, setReplaceItemOverlay] = useState<{
+    detailId: number;
+    item: OrderLetterDetail;
+  } | null>(null);
+  const [productSearchKeyword, setProductSearchKeyword] = useState("");
+  const [productSearchResults, setProductSearchResults] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isProductSearching, setIsProductSearching] = useState(false);
+  const [isSwapLoading, setIsSwapLoading] = useState(false);
 
   const { isDarkMode } = useTheme();
   const config = toolConfig[tool];
@@ -104,6 +136,12 @@ export default function ToolModals({
     setNewUser(null);
     setError("");
     setSuccessMessage("");
+    setSpOverview(null);
+    setEditOrderTab("items");
+    setReplaceItemOverlay(null);
+    setProductSearchKeyword("");
+    setProductSearchResults([]);
+    setSelectedProduct(null);
   };
 
   const handleClose = () => {
@@ -120,18 +158,36 @@ export default function ToolModals({
     setError("");
     setIsLoading(true);
     try {
-      const orderResult = await findOrderBySP(sp, accessToken);
-      if (!orderResult) {
-        setError("Nomor SP tidak ditemukan.");
-        setIsLoading(false);
-        return;
+      if (tool === "edit-order") {
+        const overview = await getSPFullOverview(sp);
+        if (!overview) {
+          setError("Nomor SP tidak ditemukan.");
+          setIsLoading(false);
+          return;
+        }
+        setSpOverview(overview);
+        setOrder({
+          id: overview.header.id,
+          no_sp: overview.header.no_sp,
+          customer_name: overview.header.customer_name,
+          extended_amount: overview.header.extended_amount,
+          status: overview.header.status,
+        });
+        setStep(2);
+      } else {
+        const orderResult = await findOrderBySP(sp, accessToken);
+        if (!orderResult) {
+          setError("Nomor SP tidak ditemukan.");
+          setIsLoading(false);
+          return;
+        }
+        setOrder(orderResult);
+        if (tool === "ganti-sales") {
+          const creatorResult = await getOrderForCreatorChange(sp);
+          setOrderCreator(creatorResult ?? null);
+        }
+        setStep(2);
       }
-      setOrder(orderResult);
-      if (tool === "ganti-sales") {
-        const creatorResult = await getOrderForCreatorChange(sp);
-        setOrderCreator(creatorResult ?? null);
-      }
-      setStep(2);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memeriksa SP.");
     } finally {
@@ -216,6 +272,47 @@ export default function ToolModals({
     }
   };
 
+  const handleSearchProduct = async () => {
+    const q = productSearchKeyword.trim();
+    if (!q) return;
+    setError("");
+    setIsProductSearching(true);
+    try {
+      const result = await getProducts(1, q);
+      setProductSearchResults(result.products);
+      setSelectedProduct(null);
+      if (result.products.length === 0) setError("Produk tidak ditemukan.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal mencari produk.");
+    } finally {
+      setIsProductSearching(false);
+    }
+  };
+
+  const handleConfirmSwap = async () => {
+    if (!replaceItemOverlay || !selectedProduct) return;
+    setError("");
+    setIsSwapLoading(true);
+    try {
+      const result = await swapItemProduct(replaceItemOverlay.detailId, selectedProduct.id);
+      if (result.success) {
+        const sp = spOverview?.header.no_sp ?? spInput.trim();
+        const refreshed = await getSPFullOverview(sp);
+        if (refreshed) setSpOverview(refreshed);
+        setReplaceItemOverlay(null);
+        setProductSearchKeyword("");
+        setProductSearchResults([]);
+        setSelectedProduct(null);
+      } else {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal mengganti barang.");
+    } finally {
+      setIsSwapLoading(false);
+    }
+  };
+
   const handleConfirmGantiSales = async () => {
     if (!order || !newUser) return;
     setError("");
@@ -288,7 +385,7 @@ export default function ToolModals({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      panelClassName={`w-full max-w-md border ${panelClass}`}
+      panelClassName={`w-full ${tool === "edit-order" ? "max-w-5xl" : "max-w-md"} border ${panelClass}`}
     >
       <div
         className={`flex items-center justify-between px-6 py-4 ${headerBorderClass}`}
@@ -324,13 +421,15 @@ export default function ToolModals({
         {step === 1 && (
           <div className="space-y-4">
             <label className={`block text-sm font-medium ${labelClass}`}>
-              Nomor SP
+              {tool === "edit-order"
+                ? "Masukkan Nomor SP (misal: 2602...)"
+                : "Nomor SP"}
             </label>
             <input
               type="text"
               value={spInput}
               onChange={(e) => setSpInput(e.target.value)}
-              placeholder="Contoh: 2602141101612D"
+              placeholder={tool === "edit-order" ? "2602..." : "Contoh: 2602141101612D"}
               className={`w-full rounded-xl border px-4 py-3 focus:outline-none focus:ring-2 ${inputClass}`}
               autoFocus
             />
@@ -338,10 +437,16 @@ export default function ToolModals({
               type="button"
               onClick={handleCekSP}
               disabled={isLoading}
-              className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-500/25`}
+              className={`flex w-full items-center justify-center gap-2 ${btnPrimary} ${
+                tool === "edit-order"
+                  ? "bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/25"
+                  : "bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-500/25"
+              }`}
             >
               {isLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
+              ) : tool === "edit-order" ? (
+                "Cek Detail Lengkap"
               ) : (
                 "Cek SP"
               )}
@@ -349,7 +454,329 @@ export default function ToolModals({
           </div>
         )}
 
-        {step === 2 && order && (
+        {step === 2 && order && tool === "edit-order" && spOverview && !replaceItemOverlay && (
+          <div className="space-y-4">
+            <div className={`rounded-xl border p-4 ${isDarkMode ? "bg-slate-900/50" : "bg-slate-50"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="flex gap-3">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDarkMode ? "bg-slate-800" : "bg-slate-200"}`}>
+                      <User className="h-4 w-4 text-slate-500" />
+                    </div>
+                    <div className="min-w-0 space-y-1 text-xs sm:text-sm">
+                      <p className={`font-medium ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>Pelanggan</p>
+                      <p className={isDarkMode ? "text-slate-300" : "text-slate-700"}>{spOverview.header.customer_name || "—"}</p>
+                      {spOverview.header.phone && (
+                        <p className={`flex items-center gap-1.5 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                          <Phone className="h-3 w-3 shrink-0" />
+                          {spOverview.header.phone}
+                        </p>
+                      )}
+                      {spOverview.header.email && (
+                        <p className={isDarkMode ? "text-slate-400" : "text-slate-600"}>{spOverview.header.email}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDarkMode ? "bg-slate-800" : "bg-slate-200"}`}>
+                      <MapPin className="h-4 w-4 text-slate-500" />
+                    </div>
+                    <div className="min-w-0 space-y-1 text-xs sm:text-sm">
+                      <p className={`font-medium ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>Pengiriman</p>
+                      <p className={isDarkMode ? "text-slate-300" : "text-slate-700"}>
+                        {(spOverview.header.address_ship_to || spOverview.header.address) || "—"}
+                      </p>
+                      {spOverview.header.request_date && (
+                        <p className={`flex items-center gap-1.5 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                          <Calendar className="h-3 w-3 shrink-0" />
+                          Req: {new Date(spOverview.header.request_date).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                        </p>
+                      )}
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${spOverview.header.take_away ? (isDarkMode ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-800") : (isDarkMode ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-800")}`}>
+                        {spOverview.header.take_away ? "Ambil Sendiri" : "Kirim"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDarkMode ? "bg-slate-800" : "bg-slate-200"}`}>
+                      <ClipboardList className="h-4 w-4 text-slate-500" />
+                    </div>
+                    <div className="min-w-0 space-y-1 text-xs sm:text-sm">
+                      <p className={`font-medium ${isDarkMode ? "text-slate-200" : "text-slate-800"}`}>Info Order</p>
+                      {spOverview.header.sales_code && (
+                        <p className={isDarkMode ? "text-slate-300" : "text-slate-700"}>Sales: {spOverview.header.sales_code}</p>
+                      )}
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${isDarkMode ? "bg-slate-700 text-slate-300" : "bg-slate-200 text-slate-700"}`}>
+                        {spOverview.header.status || "—"}
+                      </span>
+                      {spOverview.header.note && (
+                        <p className={`italic ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{spOverview.header.note}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className={`text-xs font-medium uppercase tracking-wide ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>Total</p>
+                  <p className={`text-xl font-bold sm:text-2xl ${reviewPriceClass}`}>{formatPrice(spOverview.header.extended_amount)}</p>
+                  <p className={`text-xs ${isDarkMode ? "text-slate-500" : "text-slate-500"}`}>{spOverview.header.no_sp}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
+              {(["items", "payments", "approvals"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setEditOrderTab(t)}
+                  className={`flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition ${
+                    editOrderTab === t
+                      ? isDarkMode
+                        ? "bg-slate-800 text-cyan-300"
+                        : "bg-slate-100 text-blue-700"
+                      : isDarkMode
+                        ? "text-slate-400 hover:bg-slate-800/50"
+                        : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {t === "items" && <Package className="h-4 w-4" />}
+                  {t === "payments" && <CreditCard className="h-4 w-4" />}
+                  {t === "approvals" && <ShieldCheck className="h-4 w-4" />}
+                  {t === "items" ? "ITEMS" : t === "payments" ? "PAYMENTS" : "APPROVALS"}
+                </button>
+              ))}
+            </div>
+            {editOrderTab === "items" && (
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={isDarkMode ? "bg-slate-800/50" : "bg-slate-50"}>
+                      <th className="w-[30%] px-3 py-2 text-left text-xs font-medium uppercase tracking-wide">Produk</th>
+                      <th className="w-[5%] px-3 py-2 text-center text-xs font-medium uppercase tracking-wide">Qty</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-medium uppercase tracking-wide">Pricelist</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-medium uppercase tracking-wide">Harga Deal</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-medium uppercase tracking-wide">Diskon (Potongan)</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-medium uppercase tracking-wide">Total</th>
+                      <th className="px-3 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spOverview.items.map((item) => (
+                      <tr
+                        key={item.id}
+                        className={`border-t ${isDarkMode ? "border-slate-700" : "border-slate-200"}`}
+                      >
+                        <td className="w-[30%] px-3 py-2">{item.item_description}</td>
+                        <td className="w-[5%] px-3 py-2 text-center">{item.qty}</td>
+                        <td className={`whitespace-nowrap px-3 py-2 text-right ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatPrice(item.unit_price)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-bold text-blue-600 dark:text-blue-400">
+                          {item.customer_price != null ? formatPrice(item.customer_price) : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-sm">
+                          {(() => {
+                            const netPrice = item.net_price ?? 0;
+                            const discount = netPrice === 0 ? item.unit_price : item.unit_price - netPrice;
+                            return discount === 0 ? (
+                              <span className={isDarkMode ? "text-slate-500" : "text-slate-400"}>—</span>
+                            ) : (
+                              <span className="text-red-500 dark:text-red-400">- {formatPrice(discount)}</span>
+                            );
+                          })()}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                          {item.extended_price === 0 ? (
+                            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:bg-emerald-400/30 dark:text-emerald-400">
+                              BONUS
+                            </span>
+                          ) : (
+                            formatPrice(item.extended_price)
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => setReplaceItemOverlay({ detailId: item.id, item })}
+                            className="flex items-center gap-1 rounded-lg border border-violet-500/50 bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-600 hover:bg-violet-500/20 dark:text-violet-400"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Ganti
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {editOrderTab === "payments" && (
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={isDarkMode ? "bg-slate-800/50" : "bg-slate-50"}>
+                      <th className="px-3 py-2 text-left font-medium">Metode</th>
+                      <th className="px-3 py-2 text-right font-medium">Jumlah</th>
+                      <th className="px-3 py-2 text-left font-medium">Tanggal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spOverview.payments.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-center text-slate-500">
+                          Tidak ada data pembayaran
+                        </td>
+                      </tr>
+                    ) : (
+                      spOverview.payments.map((p) => (
+                        <tr
+                          key={p.id}
+                          className={`border-t ${isDarkMode ? "border-slate-700" : "border-slate-200"}`}
+                        >
+                          <td className="px-3 py-2">{p.payment_method}</td>
+                          <td className="px-3 py-2 text-right font-medium">
+                            {formatPrice(p.payment_amount)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-500">
+                            {p.created_at ? new Date(p.created_at).toLocaleDateString("id-ID") : "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {editOrderTab === "approvals" && (
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={isDarkMode ? "bg-slate-800/50" : "bg-slate-50"}>
+                      <th className="px-3 py-2 text-left font-medium">Approver</th>
+                      <th className="px-3 py-2 text-center font-medium">Level</th>
+                      <th className="px-3 py-2 text-right font-medium">Diskon</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spOverview.approvals.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-4 text-center text-slate-500">
+                          Tidak ada data approval
+                        </td>
+                      </tr>
+                    ) : (
+                      spOverview.approvals.map((a) => (
+                        <tr
+                          key={a.id}
+                          className={`border-t ${isDarkMode ? "border-slate-700" : "border-slate-200"}`}
+                        >
+                          <td className="px-3 py-2">{a.approver_name}</td>
+                          <td className="px-3 py-2 text-center">{a.approver_level_id}</td>
+                          <td className="px-3 py-2 text-right">
+                            {a.discount != null ? `${a.discount}%` : "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className={`rounded-xl border px-4 py-2 text-sm font-medium ${secondaryBtnClass}`}
+            >
+              Ganti SP
+            </button>
+          </div>
+        )}
+
+        {step === 2 && replaceItemOverlay && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReplaceItemOverlay(null);
+                  setProductSearchKeyword("");
+                  setProductSearchResults([]);
+                  setSelectedProduct(null);
+                }}
+                className={`rounded-lg p-1.5 ${secondaryBtnClass}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <span className="text-sm font-medium">Ganti Barang</span>
+            </div>
+            <div className={`rounded-xl border p-3 text-sm ${reviewBoxClass}`}>
+              <p className={reviewLabelClass}>Saat ini:</p>
+              <p className={reviewValueClass}>{replaceItemOverlay.item.item_description}</p>
+              <p className={reviewPriceClass}>
+                {formatPrice(replaceItemOverlay.item.unit_price)} × {replaceItemOverlay.item.qty} ={" "}
+                {formatPrice(replaceItemOverlay.item.extended_price)}
+              </p>
+            </div>
+            <div>
+              <label className={`mb-1 block text-sm font-medium ${labelClass}`}>Cari produk baru</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={productSearchKeyword}
+                  onChange={(e) => setProductSearchKeyword(e.target.value)}
+                  placeholder="Kata kunci produk..."
+                  className={`flex-1 rounded-xl border px-4 py-2.5 focus:outline-none focus:ring-2 ${inputClass}`}
+                />
+                <button
+                  type="button"
+                  onClick={handleSearchProduct}
+                  disabled={isProductSearching}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${secondaryBtnClass}`}
+                >
+                  {isProductSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cari"}
+                </button>
+              </div>
+            </div>
+            {productSearchResults.length > 0 && (
+              <div className="max-h-40 space-y-1 overflow-y-auto">
+                {productSearchResults.map((prod) => (
+                  <button
+                    key={prod.id}
+                    type="button"
+                    onClick={() => setSelectedProduct(prod)}
+                    className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${storeItemClass(selectedProduct?.id === prod.id)}`}
+                  >
+                    <span className="font-medium">{prod.brand} {prod.tipe}</span>
+                    <span className="block text-xs opacity-80">{prod.ukuran} - {formatPrice(prod.end_user_price)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedProduct && (
+              <div className={`rounded-xl border p-3 text-sm ${userBoxClass}`}>
+                <p className={reviewLabelClass}>Diganti ke:</p>
+                <p className={reviewValueClass}>{selectedProduct.brand} {selectedProduct.tipe} {selectedProduct.ukuran}</p>
+                <p className={reviewPriceClass}>
+                  {formatPrice(selectedProduct.end_user_price)} × {replaceItemOverlay.item.qty} ={" "}
+                  {formatPrice(selectedProduct.end_user_price * replaceItemOverlay.item.qty)}
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleConfirmSwap}
+              disabled={!selectedProduct || isSwapLoading}
+              className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/25`}
+            >
+              {isSwapLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                "Konfirmasi Ganti Barang"
+              )}
+            </button>
+          </div>
+        )}
+
+        {step === 2 && order && tool !== "edit-order" && (
           <div className="space-y-4">
             <div className={`rounded-xl border p-4 ${reviewBoxClass}`}>
               <div className="grid gap-2 text-sm">
