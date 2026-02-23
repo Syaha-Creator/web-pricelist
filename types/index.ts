@@ -6,6 +6,8 @@ export interface User {
   id: number;
   name: string;
   email: string;
+  /** Nama lengkap dari tabel contacts (first + middle + last), untuk tampilan di Ganti Sales */
+  fullName?: string;
 }
 
 export interface Product {

@@ -22,12 +22,13 @@ import {
 } from "lucide-react";
 import { useTheme } from "./ThemeContext";
 import {
-  findOrderBySP,
+  findOrder,
   voidOrderViaAPI,
   searchWorkPlaces,
   updateOrderWorkPlace,
   getOrderForCreatorChange,
   findUserByEmail,
+  searchUsers,
   updateOrderCreator,
   getSPFullOverview,
   getProducts,
@@ -104,6 +105,7 @@ export default function ToolModals({
   const [stores, setStores] = useState<WorkPlace[]>([]);
   const [selectedStore, setSelectedStore] = useState<WorkPlace | null>(null);
   const [emailInput, setEmailInput] = useState("");
+  const [searchUserResults, setSearchUserResults] = useState<UserType[]>([]);
   const [newUser, setNewUser] = useState<UserType | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -142,6 +144,7 @@ export default function ToolModals({
     setProductSearchKeyword("");
     setProductSearchResults([]);
     setSelectedProduct(null);
+    setSearchUserResults([]);
   };
 
   const handleClose = () => {
@@ -152,16 +155,18 @@ export default function ToolModals({
   const handleCekSP = async () => {
     const sp = spInput.trim();
     if (!sp) {
-      setError("Masukkan nomor SP.");
+      setError("Masukkan nomor SP atau ID Order Letter.");
       return;
     }
     setError("");
     setIsLoading(true);
+    const isId = /^\d+$/.test(sp);
+    const spOrId = isId ? Number(sp) : sp;
     try {
       if (tool === "edit-order") {
-        const overview = await getSPFullOverview(sp);
+        const overview = await getSPFullOverview(spOrId);
         if (!overview) {
-          setError("Nomor SP tidak ditemukan.");
+          setError(isId ? "ID Order Letter tidak ditemukan." : "Nomor SP tidak ditemukan.");
           setIsLoading(false);
           return;
         }
@@ -175,15 +180,15 @@ export default function ToolModals({
         });
         setStep(2);
       } else {
-        const orderResult = await findOrderBySP(sp, accessToken);
+        const orderResult = await findOrder(spOrId, accessToken);
         if (!orderResult) {
-          setError("Nomor SP tidak ditemukan.");
+          setError(isId ? "ID Order Letter tidak ditemukan." : "Nomor SP tidak ditemukan.");
           setIsLoading(false);
           return;
         }
         setOrder(orderResult);
         if (tool === "ganti-sales") {
-          const creatorResult = await getOrderForCreatorChange(sp);
+          const creatorResult = await getOrderForCreatorChange(spOrId);
           setOrderCreator(creatorResult ?? null);
         }
         setStep(2);
@@ -235,7 +240,7 @@ export default function ToolModals({
     setError("");
     setIsLoading(true);
     try {
-      const result = await updateOrderWorkPlace(order.no_sp, selectedStore.id);
+      const result = await updateOrderWorkPlace(order.id, selectedStore.id);
       if (result.success) {
         setSuccessMessage(
           `SP ${order.no_sp} berhasil dipindah ke ${selectedStore.name}.`
@@ -252,21 +257,41 @@ export default function ToolModals({
   };
 
   const handleSearchUser = async () => {
-    const email = emailInput.trim();
-    if (!email) return;
+    const q = emailInput.trim();
+    if (!q) return;
     setError("");
+    setNewUser(null);
+    setSearchUserResults([]);
     setIsLoading(true);
     try {
-      const user = await findUserByEmail(email, accessToken);
-      if (!user) {
-        setError("Email tidak ditemukan di database user.");
-        setNewUser(null);
+      const list = await searchUsers(q);
+      if (list.length === 0) {
+        setError("Tidak ada user dengan nama atau email tersebut.");
       } else {
-        setNewUser(user);
+        setSearchUserResults(list);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal mencari user.");
-      setNewUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSelectUser = async (user: UserType) => {
+    setError("");
+    setIsLoading(true);
+    try {
+      const full = await findUserByEmail(user.email, accessToken);
+      if (full) {
+        setNewUser(full);
+        setSearchUserResults([]);
+      } else {
+        setNewUser(user);
+        setSearchUserResults([]);
+      }
+    } catch {
+      setNewUser(user);
+      setSearchUserResults([]);
     } finally {
       setIsLoading(false);
     }
@@ -319,7 +344,7 @@ export default function ToolModals({
     setIsLoading(true);
     try {
       const result = await updateOrderCreator(
-        order.no_sp,
+        order.id,
         newUser.id,
         newUser.name
       );
@@ -422,14 +447,14 @@ export default function ToolModals({
           <div className="space-y-4">
             <label className={`block text-sm font-medium ${labelClass}`}>
               {tool === "edit-order"
-                ? "Masukkan Nomor SP (misal: 2602...)"
-                : "Nomor SP"}
+                ? "No SP atau ID Order Letter"
+                : "No SP atau ID Order Letter"}
             </label>
             <input
               type="text"
               value={spInput}
               onChange={(e) => setSpInput(e.target.value)}
-              placeholder={tool === "edit-order" ? "2602..." : "Contoh: 2602141101612D"}
+              placeholder={tool === "edit-order" ? "Contoh: 2602... atau 12345" : "Contoh: 2602141101612D atau 12345"}
               className={`w-full rounded-xl border px-4 py-3 focus:outline-none focus:ring-2 ${inputClass}`}
               autoFocus
             />
@@ -918,17 +943,18 @@ export default function ToolModals({
                 <label
                   className={`block text-sm font-medium ${labelClass}`}
                 >
-                  Email sales baru
+                  Cari sales baru (nama lengkap atau email)
                 </label>
                 <div className="flex gap-2">
                   <input
-                    type="email"
+                    type="text"
                     value={emailInput}
                     onChange={(e) => {
                       setEmailInput(e.target.value);
                       setNewUser(null);
+                      setSearchUserResults([]);
                     }}
-                    placeholder="email@example.com"
+                    placeholder="Ketik nama atau email..."
                     className={`flex-1 rounded-xl border px-4 py-2.5 focus:outline-none focus:ring-2 ${inputClass}`}
                   />
                   <button
@@ -937,9 +963,31 @@ export default function ToolModals({
                     disabled={isLoading}
                     className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${secondaryBtnClass}`}
                   >
-                    Cek
+                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cari"}
                   </button>
                 </div>
+                {searchUserResults.length > 0 && (
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                    {searchUserResults.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => handleSelectUser(u)}
+                        className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition ${storeItemClass(newUser?.id === u.id)}`}
+                      >
+                        <p className={`font-medium ${userTextClass}`}>
+                          {u.fullName || u.name}
+                        </p>
+                        {u.fullName && u.name && (
+                          <p className={`text-xs opacity-80 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                            {u.name}
+                          </p>
+                        )}
+                        <p className={`text-xs ${userEmailClass}`}>{u.email}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {newUser && (
                   <div
                     className={`rounded-xl border p-3 text-sm ${userBoxClass}`}
@@ -948,6 +996,13 @@ export default function ToolModals({
                       {newUser.name}
                     </p>
                     <p className={userEmailClass}>{newUser.email}</p>
+                    <button
+                      type="button"
+                      onClick={() => { setNewUser(null); setSearchUserResults([]); }}
+                      className="mt-2 text-xs underline opacity-80 hover:opacity-100"
+                    >
+                      Ganti pilihan
+                    </button>
                   </div>
                 )}
                 <button

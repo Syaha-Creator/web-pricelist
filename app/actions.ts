@@ -197,6 +197,48 @@ export async function findOrderBySP(
   }
 }
 
+export async function findOrderById(
+  orderId: number,
+  _accessToken?: string | null
+): Promise<OrderLetter | null> {
+  if (!orderId || orderId <= 0) return null;
+
+  try {
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT id, no_sp, customer_name, extended_amount, status
+       FROM order_letters
+       WHERE id = $1
+       LIMIT 1`,
+      [orderId]
+    );
+
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    return {
+      id: Number(row.id ?? 0),
+      no_sp: String(row.no_sp ?? ""),
+      customer_name: String(row.customer_name ?? ""),
+      extended_amount: Number(row.extended_amount ?? 0),
+      status: String(row.status ?? ""),
+    };
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
+}
+
+/** Cari order by No SP (string) atau ID Order Letter (number). */
+export async function findOrder(
+  spOrId: string | number,
+  accessToken?: string | null
+): Promise<OrderLetter | null> {
+  if (typeof spOrId === "number") {
+    return findOrderById(spOrId, accessToken);
+  }
+  return findOrderBySP(spOrId, accessToken);
+}
+
 export async function voidOrderViaAPI(
   orderId: number,
   accessToken: string
@@ -278,24 +320,31 @@ export async function searchWorkPlaces(
 }
 
 export async function updateOrderWorkPlace(
-  spNumber: string,
+  spOrId: string | number,
   workPlaceId: number
 ): Promise<{ success: true } | { success: false; error: string }> {
-  const trimmedSp = spNumber?.trim();
-  if (!trimmedSp) {
-    return { success: false, error: "Nomor SP diperlukan." };
+  const byId = typeof spOrId === "number" && spOrId > 0;
+  if (!byId && (typeof spOrId !== "string" || !spOrId?.trim())) {
+    return { success: false, error: "Nomor SP atau ID Order Letter diperlukan." };
   }
 
   try {
-    const { rowCount } = await query<Record<string, unknown>>(
-      `UPDATE order_letters
-       SET work_place_id = $1, updated_at = NOW()
-       WHERE no_sp = $2`,
-      [workPlaceId, trimmedSp]
-    );
+    const { rowCount } = byId
+      ? await query<Record<string, unknown>>(
+          `UPDATE order_letters
+           SET work_place_id = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [workPlaceId, spOrId]
+        )
+      : await query<Record<string, unknown>>(
+          `UPDATE order_letters
+           SET work_place_id = $1, updated_at = NOW()
+           WHERE no_sp = $2`,
+          [workPlaceId, (spOrId as string).trim()]
+        );
 
     if (rowCount === 0) {
-      return { success: false, error: "Nomor SP tidak ditemukan." };
+      return { success: false, error: byId ? "ID Order Letter tidak ditemukan." : "Nomor SP tidak ditemukan." };
     }
   } catch (err) {
     if (isDbError(err)) return { success: false, error: DB_ERROR_MESSAGE };
@@ -336,48 +385,106 @@ export async function findUserByEmail(
   const dbName = String(row.name ?? "");
   const userEmail = String(row.email ?? "");
 
-  // Step B & C: Fetch official name from contact_work_experiences API (pakai token dari login)
-  let apiName: string | null = null;
-  const token = accessToken?.trim();
-  if (token) {
-    try {
-      const url = new URL(`${API_BASE_URL}/contact_work_experiences`);
-      url.searchParams.set("access_token", token);
-      url.searchParams.set("client_id", CLIENT_ID);
-      url.searchParams.set("client_secret", CLIENT_SECRET);
-      url.searchParams.set("user_id", String(userId));
+  const apiName = accessToken?.trim()
+    ? await getOfficialNameFromContact(userId, accessToken)
+    : null;
 
-      const response = await fetch(url.toString());
-      const data = (await response.json().catch(() => null)) as Record<
-        string,
-        unknown
-      > | null;
-
-      if (data?.result && Array.isArray(data.result) && data.result.length > 0) {
-        const first = data.result[0] as Record<string, unknown> | null;
-        const user = first?.user as Record<string, unknown> | null;
-        if (user?.name != null) {
-          apiName = String(user.name);
-        }
-      }
-    } catch {
-      // Fallback to DB name; no need to log for expected network/API issues
-    }
-  }
-
-  // Step D: Return with official name or DB fallback
   return {
     id: userId,
-    name: apiName?.trim() || dbName,
+    name: apiName || dbName,
     email: userEmail,
   };
 }
 
+/**
+ * Ambil nama resmi dari Contact API: gabungan first_name + middle_name + last_name.
+ * Jika API hanya mengembalikan "name", pakai itu. Supaya tampilan konsisten dengan contact.
+ */
+async function getOfficialNameFromContact(
+  userId: number,
+  accessToken: string
+): Promise<string | null> {
+  const token = accessToken?.trim();
+  if (!token || userId <= 0) return null;
+  try {
+    const url = new URL(`${API_BASE_URL}/contact_work_experiences`);
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("client_secret", CLIENT_SECRET);
+    url.searchParams.set("user_id", String(userId));
+
+    const response = await fetch(url.toString());
+    const data = (await response.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+
+    if (data?.result && Array.isArray(data.result) && data.result.length > 0) {
+      const first = data.result[0] as Record<string, unknown> | null;
+      const user = first?.user as Record<string, unknown> | null;
+      if (!user || typeof user !== "object") return null;
+
+      const firstName = user.first_name != null ? String(user.first_name).trim() : "";
+      const middleName = user.middle_name != null ? String(user.middle_name).trim() : "";
+      const lastName = user.last_name != null ? String(user.last_name).trim() : "";
+      const parts = [firstName, middleName, lastName].filter(Boolean);
+      if (parts.length > 0) {
+        return parts.join(" ").trim() || null;
+      }
+      if (user.name != null) {
+        return String(user.name).trim() || null;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** Cari user by nama atau email. Nama lengkap diambil dari tabel contacts (first_name + middle_name + last_name) by user_id. */
+export async function searchUsers(keyword: string): Promise<User[]> {
+  const trimmed = keyword?.trim();
+  if (!trimmed) return [];
+
+  const pattern = `%${trimmed}%`;
+  try {
+    const result = await query<Record<string, unknown>>(
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         INITCAP(TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.first_name), ''), NULLIF(TRIM(c.middle_name), ''), NULLIF(TRIM(c.last_name), '')))) AS full_name
+       FROM users u
+       LEFT JOIN contacts c ON c.user_id = u.id
+       WHERE u.name ILIKE $1 OR u.email ILIKE $1
+       ORDER BY full_name NULLS LAST, u.name, u.email
+       LIMIT 10`,
+      [pattern]
+    );
+    return result.rows.map((row) => {
+      const fullNameRaw = row.full_name;
+      const fullName =
+        fullNameRaw != null && String(fullNameRaw).trim() !== ""
+          ? String(fullNameRaw).trim()
+          : undefined;
+      return {
+        id: Number(row.id ?? 0),
+        name: String(row.name ?? ""),
+        email: String(row.email ?? ""),
+        ...(fullName && { fullName }),
+      };
+    });
+  } catch (err) {
+    if (isDbError(err)) throw new Error(DB_ERROR_MESSAGE);
+    throw err;
+  }
+}
+
 export async function getOrderForCreatorChange(
-  spNumber: string
+  spOrId: string | number
 ): Promise<OrderForCreatorChange | null> {
-  const trimmed = spNumber?.trim();
-  if (!trimmed) return null;
+  const byId = typeof spOrId === "number" && spOrId > 0;
+  if (!byId && (typeof spOrId !== "string" || !spOrId?.trim())) return null;
 
   try {
     const { rows } = await query<Record<string, unknown>>(
@@ -388,9 +495,9 @@ export async function getOrderForCreatorChange(
          COALESCE(u.name, 'Unknown User (' || COALESCE(o.creator, '?') || ')') as creator_name
        FROM order_letters o
        LEFT JOIN users u ON (o.creator)::bigint = u.id
-       WHERE o.no_sp = $1
+       WHERE ${byId ? "o.id = $1" : "o.no_sp = $1"}
        LIMIT 1`,
-      [trimmed]
+      [byId ? spOrId : (spOrId as string).trim()]
     );
 
     if (rows.length === 0) return null;
@@ -409,24 +516,45 @@ export async function getOrderForCreatorChange(
   }
 }
 
+/** Ambil nama lengkap dari tabel contacts (first + middle + last) by user_id. */
+async function getFullNameFromContacts(userId: number): Promise<string | null> {
+  if (userId <= 0) return null;
+  try {
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT INITCAP(TRIM(CONCAT_WS(' ', NULLIF(TRIM(c.first_name), ''), NULLIF(TRIM(c.middle_name), ''), NULLIF(TRIM(c.last_name), '')))) AS full_name
+       FROM contacts c
+       WHERE c.user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    if (rows.length === 0) return null;
+    const name = rows[0].full_name;
+    return name != null && String(name).trim() !== "" ? String(name).trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function updateOrderCreator(
-  spNumber: string,
+  spOrId: string | number,
   newUserId: number,
   newUserName: string
 ): Promise<{ success: true } | { success: false; error: string }> {
-  const trimmedSp = spNumber?.trim();
-  if (!trimmedSp) {
-    return { success: false, error: "Nomor SP diperlukan." };
+  const byId = typeof spOrId === "number" && spOrId > 0;
+  if (!byId && (typeof spOrId !== "string" || !spOrId?.trim())) {
+    return { success: false, error: "Nomor SP atau ID Order Letter diperlukan." };
   }
 
   try {
     const { rows } = await query<Record<string, unknown>>(
-      `SELECT id FROM order_letters WHERE no_sp = $1 LIMIT 1`,
-      [trimmedSp]
+      byId
+        ? `SELECT id FROM order_letters WHERE id = $1 LIMIT 1`
+        : `SELECT id FROM order_letters WHERE no_sp = $1 LIMIT 1`,
+      [byId ? spOrId : (spOrId as string).trim()]
     );
 
     if (rows.length === 0) {
-      return { success: false, error: "Nomor SP tidak ditemukan." };
+      return { success: false, error: byId ? "ID Order Letter tidak ditemukan." : "Nomor SP tidak ditemukan." };
     }
 
     const orderId = Number(rows[0].id ?? 0);
@@ -438,11 +566,14 @@ export async function updateOrderCreator(
       [orderId, newUserId]
     );
 
+    const approverName =
+      (await getFullNameFromContacts(newUserId)) ?? newUserName?.trim() ?? "";
+
     await query<Record<string, unknown>>(
       `UPDATE order_letter_discounts
        SET approver = $2, approver_name = $3, updated_at = NOW()
        WHERE order_letter_id = $1 AND approver_level_id = 1`,
-      [orderId, newUserId, newUserName]
+      [orderId, newUserId, approverName]
     );
   } catch (err) {
     if (isDbError(err)) return { success: false, error: DB_ERROR_MESSAGE };
@@ -456,10 +587,10 @@ export async function updateOrderCreator(
 // ─── Edit Order (SP Full Overview) ────────────────────────────────────────
 
 export async function getSPFullOverview(
-  spNumber: string
+  spOrId: string | number
 ): Promise<SPFullOverview | null> {
-  const trimmed = spNumber?.trim();
-  if (!trimmed) return null;
+  const byId = typeof spOrId === "number" && spOrId > 0;
+  if (!byId && (typeof spOrId !== "string" || !spOrId?.trim())) return null;
 
   try {
     const { rows: orderRows } = await query<Record<string, unknown>>(
@@ -468,9 +599,9 @@ export async function getSPFullOverview(
               order_date, request_date, sales_code, take_away,
               COALESCE(note, keterangan) as note
        FROM order_letters
-       WHERE no_sp = $1
+       WHERE ${byId ? "id = $1" : "no_sp = $1"}
        LIMIT 1`,
-      [trimmed]
+      [byId ? spOrId : (spOrId as string).trim()]
     );
 
     if (orderRows.length === 0) return null;
