@@ -364,7 +364,7 @@ export default function ToolModals({
   };
 
   const btnPrimary =
-    "rounded-xl bg-gradient-to-r py-3 font-medium text-white shadow-lg transition hover:opacity-90 disabled:opacity-50";
+    "rounded-xl bg-linear-to-r py-3 font-medium text-white shadow-lg transition hover:opacity-90 disabled:opacity-50";
   const panelClass = isDarkMode
     ? "border-slate-700 bg-slate-900"
     : "border-slate-200 bg-white/95 backdrop-blur-xl";
@@ -417,7 +417,7 @@ export default function ToolModals({
       >
         <div className="flex items-center gap-3">
           <div
-            className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${config.iconBg} text-white`}
+            className={`flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br ${config.iconBg} text-white`}
           >
             <Icon className="h-5 w-5" />
           </div>
@@ -464,8 +464,8 @@ export default function ToolModals({
               disabled={isLoading}
               className={`flex w-full items-center justify-center gap-2 ${btnPrimary} ${
                 tool === "edit-order"
-                  ? "bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/25"
-                  : "bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-500/25"
+                  ? "bg-linear-to-r from-violet-600 to-purple-600 shadow-violet-500/25"
+                  : "bg-linear-to-r from-blue-600 to-indigo-600 shadow-blue-500/25"
               }`}
             >
               {isLoading ? (
@@ -790,7 +790,7 @@ export default function ToolModals({
               type="button"
               onClick={handleConfirmSwap}
               disabled={!selectedProduct || isSwapLoading}
-              className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-violet-600 to-purple-600 shadow-violet-500/25`}
+              className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-linear-to-r from-violet-600 to-purple-600 shadow-violet-500/25`}
             >
               {isSwapLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -844,7 +844,7 @@ export default function ToolModals({
               <button
                 type="button"
                 onClick={() => setStep(3)}
-                className={`flex-1 rounded-xl py-2 text-sm font-medium text-white shadow-lg bg-gradient-to-r ${config.gradient}`}
+                className={`flex-1 rounded-xl py-2 text-sm font-medium text-white shadow-lg bg-linear-to-r ${config.gradient}`}
               >
                 Lanjut
               </button>
@@ -863,7 +863,7 @@ export default function ToolModals({
                   type="button"
                   onClick={handleVoidConfirm}
                   disabled={isLoading}
-                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-red-600 to-rose-600 shadow-red-500/25`}
+                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-linear-to-r from-red-600 to-rose-600 shadow-red-500/25`}
                 >
                   {isLoading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -924,7 +924,7 @@ export default function ToolModals({
                   type="button"
                   onClick={handleConfirmMutasi}
                   disabled={!selectedStore || isLoading}
-                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-500/25`}
+                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-linear-to-r from-blue-600 to-indigo-600 shadow-blue-500/25`}
                 >
                   {isLoading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -1009,7 +1009,7 @@ export default function ToolModals({
                   type="button"
                   onClick={handleConfirmGantiSales}
                   disabled={!newUser || isLoading}
-                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-500/25`}
+                  className={`flex w-full items-center justify-center gap-2 ${btnPrimary} bg-linear-to-r from-emerald-600 to-teal-600 shadow-emerald-500/25`}
                 >
                   {isLoading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -1040,7 +1040,7 @@ export default function ToolModals({
             <button
               type="button"
               onClick={handleClose}
-              className={`rounded-xl bg-gradient-to-r px-6 py-2.5 text-sm font-medium hover:opacity-90 ${closeBtnClass}`}
+              className={`rounded-xl bg-linear-to-r px-6 py-2.5 text-sm font-medium hover:opacity-90 ${closeBtnClass}`}
             >
               Tutup
             </button>
